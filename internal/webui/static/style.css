@@ -75,3 +75,8 @@ code {
 	border: 1px solid #f2a29c;
 	color: #b00020;
 }
+
+#key-list-body button {
+	color: #b00020;
+	border-color: #b00020;
+}

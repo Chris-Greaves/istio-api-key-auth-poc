@@ -17,8 +17,44 @@ async function loadKeys() {
 			cell.textContent = value;
 			row.appendChild(cell);
 		}
+
+		const actionCell = document.createElement("td");
+		const revokeButton = document.createElement("button");
+		revokeButton.type = "button";
+		revokeButton.textContent = "Revoke";
+		revokeButton.addEventListener("click", () => revokeKey(key.key_id));
+		actionCell.appendChild(revokeButton);
+		row.appendChild(actionCell);
+
 		tbody.appendChild(row);
 	}
+}
+
+async function revokeKey(keyID) {
+	const errorEl = document.getElementById("revoke-key-error");
+	errorEl.hidden = true;
+
+	if (!confirm(`Revoke key ${keyID}? This cannot be undone.`)) {
+		return;
+	}
+
+	let res;
+	try {
+		res = await fetch(`/api/keys/${encodeURIComponent(keyID)}`, { method: "DELETE" });
+	} catch {
+		errorEl.textContent = "Failed to reach the server.";
+		errorEl.hidden = false;
+		return;
+	}
+
+	if (!res.ok) {
+		const data = await res.json().catch(() => ({}));
+		errorEl.textContent = data.error || "Failed to revoke key.";
+		errorEl.hidden = false;
+		return;
+	}
+
+	loadKeys();
 }
 
 function formatDateTime(value) {

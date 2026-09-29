@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -81,5 +82,23 @@ func listKeysHandler(store *keys.Store) http.HandlerFunc {
 		}
 
 		writeJSON(w, http.StatusOK, resp)
+	}
+}
+
+func revokeKeyHandler(store *keys.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		keyID := r.PathValue("keyID")
+
+		err := store.Revoke(r.Context(), keyID)
+		if err != nil {
+			if errors.Is(err, keys.ErrKeyNotFound) {
+				writeJSONError(w, http.StatusNotFound, "key not found")
+				return
+			}
+			writeJSONError(w, http.StatusInternalServerError, "failed to revoke key")
+			return
+		}
+
+		w.WriteHeader(http.StatusNoContent)
 	}
 }

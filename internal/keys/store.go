@@ -53,14 +53,16 @@ func (s *Store) Create(ctx context.Context, keyID, secretHash, owner string, exp
 	return rec, nil
 }
 
-// Get looks up a single key by its Key ID, returning its metadata alongside
-// its secret hash for validation. It returns ErrKeyNotFound if no such key
-// exists.
+// Get looks up a single non-revoked key by its Key ID, returning its
+// metadata alongside its secret hash for validation. It returns
+// ErrKeyNotFound if no such key exists — including a revoked one, so that
+// Validate (and any future authentication path built on Get) treats a
+// revoked key the same as an unknown one.
 func (s *Store) Get(ctx context.Context, keyID string) (Record, string, error) {
 	var rec Record
 	var secretHash string
 	err := s.db.QueryRowContext(ctx, `
-		SELECT key_id, owner, created_at, expires_at, secret_hash FROM keys WHERE key_id = $1
+		SELECT key_id, owner, created_at, expires_at, secret_hash FROM keys WHERE key_id = $1 AND revoked_at IS NULL
 	`, keyID).Scan(&rec.KeyID, &rec.Owner, &rec.CreatedAt, &rec.ExpiresAt, &secretHash)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -71,10 +73,11 @@ func (s *Store) Get(ctx context.Context, keyID string) (Record, string, error) {
 	return rec, secretHash, nil
 }
 
-// List returns metadata for every key, most recently created first.
+// List returns metadata for every non-revoked key, most recently created
+// first.
 func (s *Store) List(ctx context.Context) ([]Record, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT key_id, owner, created_at, expires_at FROM keys ORDER BY created_at DESC
+		SELECT key_id, owner, created_at, expires_at FROM keys WHERE revoked_at IS NULL ORDER BY created_at DESC
 	`)
 	if err != nil {
 		return nil, fmt.Errorf("querying keys: %w", err)
@@ -93,6 +96,28 @@ func (s *Store) List(ctx context.Context) ([]Record, error) {
 		return nil, fmt.Errorf("iterating key rows: %w", err)
 	}
 	return records, nil
+}
+
+// Revoke marks a key as revoked so it no longer appears in List or
+// authenticates via Get/Validate. It returns ErrKeyNotFound if no active key
+// exists with the given Key ID — including one already revoked, which by
+// this point is indistinguishable from nonexistent to a caller.
+func (s *Store) Revoke(ctx context.Context, keyID string) error {
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE keys SET revoked_at = now() WHERE key_id = $1 AND revoked_at IS NULL
+	`, keyID)
+	if err != nil {
+		return fmt.Errorf("revoking key: %w", err)
+	}
+
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("checking revoke result: %w", err)
+	}
+	if affected == 0 {
+		return ErrKeyNotFound
+	}
+	return nil
 }
 
 // isKeyIDCollision reports whether err is a violation of the keys table's

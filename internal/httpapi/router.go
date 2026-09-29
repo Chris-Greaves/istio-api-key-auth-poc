@@ -17,6 +17,7 @@ func NewRouter(db *sql.DB) http.Handler {
 	mux.HandleFunc("GET /healthz", healthHandler(db))
 	mux.HandleFunc("POST /api/keys", createKeyHandler(store))
 	mux.HandleFunc("GET /api/keys", listKeysHandler(store))
+	mux.HandleFunc("DELETE /api/keys/{keyID}", revokeKeyHandler(store))
 	mux.HandleFunc("POST /api/keys/validate", validateKeyHandler(store))
 	mux.Handle("/", webui.Handler())
 	return mux

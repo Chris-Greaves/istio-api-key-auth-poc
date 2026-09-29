@@ -450,6 +450,84 @@ func TestApp_ValidateKeyRequiresAKey(t *testing.T) {
 	}
 }
 
+func revokeTestKey(t *testing.T, server *httptest.Server, keyID string) *http.Response {
+	t.Helper()
+
+	req, err := http.NewRequest(http.MethodDelete, server.URL+"/api/keys/"+keyID, nil)
+	if err != nil {
+		t.Fatalf("building revoke-key request: %v", err)
+	}
+
+	resp, err := server.Client().Do(req)
+	if err != nil {
+		t.Fatalf("calling revoke-key: %v", err)
+	}
+	return resp
+}
+
+func TestApp_RevokeKeyRemovesItFromTheList(t *testing.T) {
+	server := startServer(t)
+	created := createTestKey(t, server, `{"owner":"revoke-owner"}`)
+
+	resp := revokeTestKey(t, server, created.KeyID)
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("expected revoke-key to return %d, got %d", http.StatusNoContent, resp.StatusCode)
+	}
+
+	listResp, err := http.Get(server.URL + "/api/keys")
+	if err != nil {
+		t.Fatalf("calling list-keys: %v", err)
+	}
+	defer listResp.Body.Close()
+
+	var listed []keyResponse
+	if err := json.NewDecoder(listResp.Body).Decode(&listed); err != nil {
+		t.Fatalf("decoding list-keys response: %v", err)
+	}
+
+	for _, k := range listed {
+		if k.KeyID == created.KeyID {
+			t.Fatalf("expected revoked key %q to be absent from the list, got %+v", created.KeyID, listed)
+		}
+	}
+}
+
+func TestApp_ValidateKeyRejectsARevokedKey(t *testing.T) {
+	server := startServer(t)
+	created := createTestKey(t, server, `{"owner":"revoke-owner"}`)
+
+	resp := revokeTestKey(t, server, created.KeyID)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("expected revoke-key to return %d, got %d", http.StatusNoContent, resp.StatusCode)
+	}
+
+	status, result := validateTestKey(t, server, created.Key)
+
+	if status != http.StatusOK {
+		t.Fatalf("expected validate-key to return %d, got %d", http.StatusOK, status)
+	}
+	if result.Valid {
+		t.Fatal("expected a revoked key to be invalid")
+	}
+	if result.Reason != "invalid key" {
+		t.Fatalf("expected a generic invalid-key reason, got %q", result.Reason)
+	}
+}
+
+func TestApp_RevokeNonexistentKeyReturnsNotFound(t *testing.T) {
+	server := startServer(t)
+
+	resp := revokeTestKey(t, server, "doesnotexist")
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected revoke-key for a nonexistent key to return %d, got %d", http.StatusNotFound, resp.StatusCode)
+	}
+}
+
 func TestNew_FailsFastWhenDatabaseIsUnreachable(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
