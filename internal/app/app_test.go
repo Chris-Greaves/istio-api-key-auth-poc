@@ -287,6 +287,44 @@ func TestApp_CreateKeyWithWhitespaceOnlyOwnerIsRejected(t *testing.T) {
 	}
 }
 
+func TestApp_CreateKeyWithAControlCharacterInOwnerIsRejected(t *testing.T) {
+	server := startServer(t)
+
+	body, err := json.Marshal(map[string]string{"owner": "evil\r\nX-Injected: 1"})
+	if err != nil {
+		t.Fatalf("marshaling create-key request: %v", err)
+	}
+
+	resp, err := http.Post(server.URL+"/api/keys", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("calling create-key: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected create-key with a control character in owner to return %d, got %d", http.StatusBadRequest, resp.StatusCode)
+	}
+}
+
+func TestApp_CreateKeyWithAnOverlongOwnerIsRejected(t *testing.T) {
+	server := startServer(t)
+
+	body, err := json.Marshal(map[string]string{"owner": strings.Repeat("a", 257)})
+	if err != nil {
+		t.Fatalf("marshaling create-key request: %v", err)
+	}
+
+	resp, err := http.Post(server.URL+"/api/keys", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("calling create-key: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected create-key with an owner over 256 characters to return %d, got %d", http.StatusBadRequest, resp.StatusCode)
+	}
+}
+
 func createTestKey(t *testing.T, server *httptest.Server, requestBody string) keyResponse {
 	t.Helper()
 
@@ -525,6 +563,98 @@ func TestApp_RevokeNonexistentKeyReturnsNotFound(t *testing.T) {
 
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("expected revoke-key for a nonexistent key to return %d, got %d", http.StatusNotFound, resp.StatusCode)
+	}
+}
+
+func checkAuthz(t *testing.T, server *httptest.Server, key string) (int, http.Header) {
+	t.Helper()
+
+	req, err := http.NewRequest(http.MethodGet, server.URL+"/authz/check", nil)
+	if err != nil {
+		t.Fatalf("building check-authz request: %v", err)
+	}
+	if key != "" {
+		req.Header.Set("X-API-Key", key)
+	}
+
+	resp, err := server.Client().Do(req)
+	if err != nil {
+		t.Fatalf("calling check-authz: %v", err)
+	}
+	defer resp.Body.Close()
+
+	return resp.StatusCode, resp.Header
+}
+
+func TestApp_CheckAuthzAllowsAValidActiveKeyAndInjectsOwnerHeader(t *testing.T) {
+	server := startServer(t)
+	created := createTestKey(t, server, `{"owner":"authz-owner"}`)
+
+	status, headers := checkAuthz(t, server, created.Key)
+
+	if status != http.StatusOK {
+		t.Fatalf("expected check-authz to return %d for a valid key, got %d", http.StatusOK, status)
+	}
+	if owner := headers.Get("X-API-Key-Owner"); owner != "authz-owner" {
+		t.Fatalf("expected owner header %q, got %q", "authz-owner", owner)
+	}
+}
+
+func TestApp_CheckAuthzDeniesAMissingKey(t *testing.T) {
+	server := startServer(t)
+
+	status, _ := checkAuthz(t, server, "")
+
+	if status != http.StatusUnauthorized {
+		t.Fatalf("expected check-authz to return %d for a missing key, got %d", http.StatusUnauthorized, status)
+	}
+}
+
+func TestApp_CheckAuthzDeniesAMalformedKey(t *testing.T) {
+	server := startServer(t)
+
+	status, _ := checkAuthz(t, server, "not-a-key")
+
+	if status != http.StatusUnauthorized {
+		t.Fatalf("expected check-authz to return %d for a malformed key, got %d", http.StatusUnauthorized, status)
+	}
+}
+
+func TestApp_CheckAuthzDeniesAnUnknownKey(t *testing.T) {
+	server := startServer(t)
+
+	status, _ := checkAuthz(t, server, "api_00000000_"+strings.Repeat("a", 32))
+
+	if status != http.StatusUnauthorized {
+		t.Fatalf("expected check-authz to return %d for an unknown key, got %d", http.StatusUnauthorized, status)
+	}
+}
+
+func TestApp_CheckAuthzDeniesAnExpiredKey(t *testing.T) {
+	server := startServer(t)
+	created := createTestKey(t, server, `{"owner":"authz-owner","expires_at":"2020-01-01T00:00:00Z"}`)
+
+	status, _ := checkAuthz(t, server, created.Key)
+
+	if status != http.StatusUnauthorized {
+		t.Fatalf("expected check-authz to return %d for an expired key, got %d", http.StatusUnauthorized, status)
+	}
+}
+
+func TestApp_CheckAuthzDeniesARevokedKey(t *testing.T) {
+	server := startServer(t)
+	created := createTestKey(t, server, `{"owner":"authz-owner"}`)
+
+	resp := revokeTestKey(t, server, created.KeyID)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("expected revoke-key to return %d, got %d", http.StatusNoContent, resp.StatusCode)
+	}
+
+	status, _ := checkAuthz(t, server, created.Key)
+
+	if status != http.StatusUnauthorized {
+		t.Fatalf("expected check-authz to return %d for a revoked key, got %d", http.StatusUnauthorized, status)
 	}
 }
 

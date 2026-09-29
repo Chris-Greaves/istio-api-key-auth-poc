@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/cjgreaves97/istio-api-key-auth-poc/internal/keys"
 )
@@ -13,6 +14,26 @@ import (
 // unauthenticated caller (ADR-0003: no Web UI auth for the PoC) can't force
 // unbounded JSON decoding on this endpoint.
 const maxCreateKeyBodyBytes = 1 << 20 // 1 MiB
+
+// maxOwnerLength bounds Owner, which the check endpoint (ADR-0001) injects
+// verbatim as a response header that upstream services trust for
+// attribution — not just display text, so it needs a sane size limit.
+const maxOwnerLength = 256
+
+// validOwner reports whether owner is non-empty, within maxOwnerLength, and
+// free of control characters — required now that the check endpoint forwards
+// it as a trusted response header rather than only ever displaying it.
+func validOwner(owner string) bool {
+	if owner == "" || len(owner) > maxOwnerLength {
+		return false
+	}
+	for _, r := range owner {
+		if unicode.IsControl(r) {
+			return false
+		}
+	}
+	return true
+}
 
 type createKeyRequest struct {
 	Owner     string     `json:"owner"`
@@ -50,8 +71,8 @@ func createKeyHandler(store *keys.Store) http.HandlerFunc {
 		}
 
 		owner := strings.TrimSpace(req.Owner)
-		if owner == "" {
-			writeJSONError(w, http.StatusBadRequest, "owner is required")
+		if !validOwner(owner) {
+			writeJSONError(w, http.StatusBadRequest, "owner is required, must not contain control characters, and must be at most 256 characters")
 			return
 		}
 

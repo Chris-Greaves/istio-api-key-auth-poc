@@ -19,6 +19,7 @@ func NewRouter(db *sql.DB) http.Handler {
 	mux.HandleFunc("GET /api/keys", listKeysHandler(store))
 	mux.HandleFunc("DELETE /api/keys/{keyID}", revokeKeyHandler(store))
 	mux.HandleFunc("POST /api/keys/validate", validateKeyHandler(store))
+	mux.HandleFunc("/authz/check", checkAuthzHandler(store))
 	mux.Handle("/", webui.Handler())
 	return mux
 }

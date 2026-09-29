@@ -15,6 +15,12 @@ type ValidationResult struct {
 	Valid  bool
 	Reason string // set when Valid is false
 	Owner  string // set when Valid is true
+	// KeyID is set once the secret has been verified against a real key
+	// record — including when that key later turns out expired — but never
+	// for a malformed, unknown, or wrong-secret key. Callers that surface it
+	// (e.g. in telemetry) can then trust it names a real key rather than
+	// unverified caller input.
+	KeyID string
 }
 
 // Validate checks a plaintext API key (api_<Key ID>_<secret>) against the
@@ -47,10 +53,10 @@ func Validate(ctx context.Context, store *Store, plaintext string) (ValidationRe
 	}
 
 	if rec.ExpiresAt != nil && rec.ExpiresAt.Before(time.Now()) {
-		return ValidationResult{Reason: "key has expired"}, nil
+		return ValidationResult{Reason: "key has expired", KeyID: rec.KeyID}, nil
 	}
 
-	return ValidationResult{Valid: true, Owner: rec.Owner}, nil
+	return ValidationResult{Valid: true, Owner: rec.Owner, KeyID: rec.KeyID}, nil
 }
 
 // ParseKey splits a plaintext API key into its Key ID and secret, per the
