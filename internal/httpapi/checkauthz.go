@@ -9,7 +9,7 @@ import (
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/cjgreaves97/istio-api-key-auth-poc/internal/keys"
+	"github.com/Chris-Greaves/istio-api-key-auth-poc/internal/keys"
 )
 
 // ownerHeader is the response header the check endpoint injects on a

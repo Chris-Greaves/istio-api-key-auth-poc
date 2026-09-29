@@ -5,8 +5,8 @@ import (
 	"database/sql"
 	"net/http"
 
-	"github.com/cjgreaves97/istio-api-key-auth-poc/internal/keys"
-	"github.com/cjgreaves97/istio-api-key-auth-poc/internal/webui"
+	"github.com/Chris-Greaves/istio-api-key-auth-poc/internal/keys"
+	"github.com/Chris-Greaves/istio-api-key-auth-poc/internal/webui"
 )
 
 // NewRouter builds the top-level HTTP handler for the service.

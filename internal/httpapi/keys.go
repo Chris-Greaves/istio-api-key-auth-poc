@@ -7,7 +7,7 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/cjgreaves97/istio-api-key-auth-poc/internal/keys"
+	"github.com/Chris-Greaves/istio-api-key-auth-poc/internal/keys"
 )
 
 // maxCreateKeyBodyBytes bounds the create-key request body so an

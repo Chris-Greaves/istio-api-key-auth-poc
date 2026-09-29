@@ -4,7 +4,7 @@ import (
 	"regexp"
 	"testing"
 
-	"github.com/cjgreaves97/istio-api-key-auth-poc/internal/keys"
+	"github.com/Chris-Greaves/istio-api-key-auth-poc/internal/keys"
 )
 
 var fullKeyPattern = regexp.MustCompile(`^api_[a-z0-9]{8}_[a-z0-9]{32}$`)

@@ -12,7 +12,7 @@ import (
 	"github.com/golang-migrate/migrate/v4/source/iofs"
 	_ "github.com/jackc/pgx/v5/stdlib"
 
-	"github.com/cjgreaves97/istio-api-key-auth-poc/internal/database/migrations"
+	"github.com/Chris-Greaves/istio-api-key-auth-poc/internal/database/migrations"
 )
 
 // Connect opens a connection pool to Postgres and verifies it is reachable.

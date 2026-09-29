@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/cjgreaves97/istio-api-key-auth-poc/internal/config"
-	"github.com/cjgreaves97/istio-api-key-auth-poc/internal/database"
-	"github.com/cjgreaves97/istio-api-key-auth-poc/internal/httpapi"
+	"github.com/Chris-Greaves/istio-api-key-auth-poc/internal/config"
+	"github.com/Chris-Greaves/istio-api-key-auth-poc/internal/database"
+	"github.com/Chris-Greaves/istio-api-key-auth-poc/internal/httpapi"
 )
 
 // App holds the fully wired, ready-to-serve application.

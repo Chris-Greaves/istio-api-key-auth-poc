@@ -18,8 +18,8 @@ import (
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
 
-	"github.com/cjgreaves97/istio-api-key-auth-poc/internal/app"
-	"github.com/cjgreaves97/istio-api-key-auth-poc/internal/config"
+	"github.com/Chris-Greaves/istio-api-key-auth-poc/internal/app"
+	"github.com/Chris-Greaves/istio-api-key-auth-poc/internal/config"
 )
 
 func startPostgres(t *testing.T) string {

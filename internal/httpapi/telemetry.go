@@ -10,7 +10,7 @@ import (
 // providers are no-ops until an exporter is registered (ticket 05 wires up
 // the Prometheus exporter); emitting against them now means the check
 // endpoint's instrumentation needs no changes once that exporter lands.
-const instrumentationName = "github.com/cjgreaves97/istio-api-key-auth-poc/internal/httpapi"
+const instrumentationName = "github.com/Chris-Greaves/istio-api-key-auth-poc/internal/httpapi"
 
 var checkTracer trace.Tracer = otel.Tracer(instrumentationName)
 

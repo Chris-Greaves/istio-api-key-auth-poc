@@ -3,7 +3,7 @@ package config_test
 import (
 	"testing"
 
-	"github.com/cjgreaves97/istio-api-key-auth-poc/internal/config"
+	"github.com/Chris-Greaves/istio-api-key-auth-poc/internal/config"
 )
 
 func TestLoad_RequiresDatabaseURL(t *testing.T) {

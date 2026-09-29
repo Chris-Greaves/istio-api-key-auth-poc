@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/cjgreaves97/istio-api-key-auth-poc/internal/keys"
+	"github.com/Chris-Greaves/istio-api-key-auth-poc/internal/keys"
 )
 
 // maxValidateKeyBodyBytes bounds the validate-key request body so an

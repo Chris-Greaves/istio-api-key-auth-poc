@@ -1,4 +1,4 @@
-module github.com/cjgreaves97/istio-api-key-auth-poc
+module github.com/Chris-Greaves/istio-api-key-auth-poc
 
 go 1.26.3
 

@@ -3,7 +3,7 @@ package keys_test
 import (
 	"testing"
 
-	"github.com/cjgreaves97/istio-api-key-auth-poc/internal/keys"
+	"github.com/Chris-Greaves/istio-api-key-auth-poc/internal/keys"
 )
 
 func TestParseKey_AcceptsAWellFormedKey(t *testing.T) {
