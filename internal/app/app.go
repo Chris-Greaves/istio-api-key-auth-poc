@@ -10,6 +10,7 @@ import (
 	"github.com/Chris-Greaves/istio-api-key-auth-poc/internal/config"
 	"github.com/Chris-Greaves/istio-api-key-auth-poc/internal/database"
 	"github.com/Chris-Greaves/istio-api-key-auth-poc/internal/httpapi"
+	"github.com/Chris-Greaves/istio-api-key-auth-poc/internal/telemetry"
 )
 
 // App holds the fully wired, ready-to-serve application.
@@ -32,9 +33,15 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 		return nil, fmt.Errorf("applying migrations: %w", err)
 	}
 
+	metrics, err := telemetry.Setup()
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("setting up telemetry: %w", err)
+	}
+
 	return &App{
 		db:      db,
-		handler: httpapi.NewRouter(db),
+		handler: httpapi.NewRouter(db, metrics.Handler),
 	}, nil
 }
 

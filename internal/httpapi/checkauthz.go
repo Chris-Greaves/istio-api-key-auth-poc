@@ -6,8 +6,6 @@ import (
 	"strings"
 
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/metric"
-	"go.opentelemetry.io/otel/trace"
 
 	"github.com/Chris-Greaves/istio-api-key-auth-poc/internal/keys"
 )
@@ -25,7 +23,7 @@ const ownerHeader = "X-API-Key-Owner"
 // letting it through unchecked.
 func checkAuthzHandler(store *keys.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		ctx, span := checkTracer.Start(r.Context(), "check_service.check")
+		ctx, span := tracer.Start(r.Context(), "check_service.check")
 		defer span.End()
 
 		key := strings.TrimSpace(r.Header.Get("X-API-Key"))
@@ -65,18 +63,14 @@ func allowCheck(ctx context.Context, keyID string) {
 	recordDecision(ctx, "allowed", "", keyID)
 }
 
-// recordDecision tags the current span and increments the decisions counter
-// with enough context — result, deny reason, and Key ID when known — to
-// debug a denial from telemetry alone, without reading application logs.
+// recordDecision records a check decision's outcome — result, deny reason,
+// and Key ID when known — on the check-decisions counter, giving enough
+// context to debug a denial from telemetry alone, without reading
+// application logs.
 func recordDecision(ctx context.Context, result, reason, keyID string) {
 	attrs := []attribute.KeyValue{attribute.String("result", result)}
 	if reason != "" {
 		attrs = append(attrs, attribute.String("reason", reason))
 	}
-	if keyID != "" {
-		attrs = append(attrs, attribute.String("key_id", keyID))
-	}
-
-	trace.SpanFromContext(ctx).SetAttributes(attrs...)
-	checkDecisions.Add(ctx, 1, metric.WithAttributes(attrs...))
+	recordEvent(ctx, checkDecisions, keyID, attrs...)
 }

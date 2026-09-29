@@ -9,12 +9,14 @@ import (
 	"github.com/Chris-Greaves/istio-api-key-auth-poc/internal/webui"
 )
 
-// NewRouter builds the top-level HTTP handler for the service.
-func NewRouter(db *sql.DB) http.Handler {
+// NewRouter builds the top-level HTTP handler for the service. metrics is
+// served at /metrics in Prometheus exposition format (ticket 05).
+func NewRouter(db *sql.DB, metrics http.Handler) http.Handler {
 	store := keys.NewStore(db)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", healthHandler(db))
+	mux.Handle("GET /metrics", metrics)
 	mux.HandleFunc("POST /api/keys", createKeyHandler(store))
 	mux.HandleFunc("GET /api/keys", listKeysHandler(store))
 	mux.HandleFunc("DELETE /api/keys/{keyID}", revokeKeyHandler(store))

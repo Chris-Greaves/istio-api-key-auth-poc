@@ -65,23 +65,28 @@ func toKeyResponse(rec keys.Record) keyResponse {
 
 func createKeyHandler(store *keys.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		ctx, span := tracer.Start(r.Context(), "management_api.create_key")
+		defer span.End()
+
 		var req createKeyRequest
 		if !decodeJSONBody(w, r, maxCreateKeyBodyBytes, &req) {
+			recordManagementRequest(ctx, "create_key", "invalid_request", "")
 			return
 		}
 
 		owner := strings.TrimSpace(req.Owner)
 		if !validOwner(owner) {
-			writeJSONError(w, http.StatusBadRequest, "owner is required, must not contain control characters, and must be at most 256 characters")
+			failManagement(ctx, w, http.StatusBadRequest, "owner is required, must not contain control characters, and must be at most 256 characters", "create_key", "invalid_request")
 			return
 		}
 
-		plaintext, rec, err := keys.CreateKey(r.Context(), store, owner, req.ExpiresAt)
+		plaintext, rec, err := keys.CreateKey(ctx, store, owner, req.ExpiresAt)
 		if err != nil {
-			writeJSONError(w, http.StatusInternalServerError, "failed to create key")
+			failManagement(ctx, w, http.StatusInternalServerError, "failed to create key", "create_key", "error")
 			return
 		}
 
+		recordManagementRequest(ctx, "create_key", "success", rec.KeyID)
 		writeJSON(w, http.StatusCreated, createKeyResponse{
 			Key:         plaintext,
 			keyResponse: toKeyResponse(rec),
@@ -91,9 +96,12 @@ func createKeyHandler(store *keys.Store) http.HandlerFunc {
 
 func listKeysHandler(store *keys.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		records, err := store.List(r.Context())
+		ctx, span := tracer.Start(r.Context(), "management_api.list_keys")
+		defer span.End()
+
+		records, err := store.List(ctx)
 		if err != nil {
-			writeJSONError(w, http.StatusInternalServerError, "failed to list keys")
+			failManagement(ctx, w, http.StatusInternalServerError, "failed to list keys", "list_keys", "error")
 			return
 		}
 
@@ -102,24 +110,34 @@ func listKeysHandler(store *keys.Store) http.HandlerFunc {
 			resp = append(resp, toKeyResponse(rec))
 		}
 
+		recordManagementRequest(ctx, "list_keys", "success", "")
 		writeJSON(w, http.StatusOK, resp)
 	}
 }
 
 func revokeKeyHandler(store *keys.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		keyID := r.PathValue("keyID")
+		ctx, span := tracer.Start(r.Context(), "management_api.revoke_key")
+		defer span.End()
 
-		err := store.Revoke(r.Context(), keyID)
+		// requestedKeyID is unverified caller input (the store hasn't
+		// confirmed it names a real key) — never pass it to failManagement's
+		// underlying telemetry as a key_id label, or an unauthenticated
+		// caller (ADR-0003) could mint arbitrary label values. Once
+		// store.Revoke succeeds it's a confirmed real Key ID, safe to record.
+		requestedKeyID := r.PathValue("keyID")
+
+		err := store.Revoke(ctx, requestedKeyID)
 		if err != nil {
 			if errors.Is(err, keys.ErrKeyNotFound) {
-				writeJSONError(w, http.StatusNotFound, "key not found")
+				failManagement(ctx, w, http.StatusNotFound, "key not found", "revoke_key", "not_found")
 				return
 			}
-			writeJSONError(w, http.StatusInternalServerError, "failed to revoke key")
+			failManagement(ctx, w, http.StatusInternalServerError, "failed to revoke key", "revoke_key", "error")
 			return
 		}
 
+		recordManagementRequest(ctx, "revoke_key", "success", requestedKeyID)
 		w.WriteHeader(http.StatusNoContent)
 	}
 }

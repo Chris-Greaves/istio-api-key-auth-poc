@@ -658,6 +658,57 @@ func TestApp_CheckAuthzDeniesARevokedKey(t *testing.T) {
 	}
 }
 
+func scrapeMetrics(t *testing.T, server *httptest.Server) (int, string) {
+	t.Helper()
+
+	resp, err := http.Get(server.URL + "/metrics")
+	if err != nil {
+		t.Fatalf("calling metrics: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("reading metrics response: %v", err)
+	}
+
+	return resp.StatusCode, string(body)
+}
+
+func TestApp_MetricsExposesCheckDecisionsCounterPerKeyIDFromRealTraffic(t *testing.T) {
+	server := startServer(t)
+	created := createTestKey(t, server, `{"owner":"metrics-owner"}`)
+
+	status, _ := checkAuthz(t, server, created.Key)
+	if status != http.StatusOK {
+		t.Fatalf("expected check-authz to return %d for a valid key, got %d", http.StatusOK, status)
+	}
+
+	metricsStatus, body := scrapeMetrics(t, server)
+	if metricsStatus != http.StatusOK {
+		t.Fatalf("expected /metrics to return %d, got %d", http.StatusOK, metricsStatus)
+	}
+	if !strings.Contains(body, "# TYPE check_service_decisions_total counter") {
+		t.Fatalf("expected /metrics to expose check_service_decisions_total in Prometheus exposition format, got:\n%s", body)
+	}
+
+	var matched string
+	for _, line := range strings.Split(body, "\n") {
+		if strings.HasPrefix(line, "check_service_decisions_total{") &&
+			strings.Contains(line, `key_id="`+created.KeyID+`"`) &&
+			strings.Contains(line, `result="allowed"`) {
+			matched = line
+			break
+		}
+	}
+	if matched == "" {
+		t.Fatalf("expected a check_service_decisions_total sample for key_id %q and result \"allowed\", got:\n%s", created.KeyID, body)
+	}
+	if !strings.HasSuffix(matched, " 1") {
+		t.Fatalf("expected the matched counter sample to have value 1, got %q", matched)
+	}
+}
+
 func TestNew_FailsFastWhenDatabaseIsUnreachable(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
