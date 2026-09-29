@@ -19,6 +19,11 @@ type Record struct {
 	ExpiresAt *time.Time
 }
 
+// activeKeyFilter excludes revoked keys. Centralized so every query that
+// must ignore revoked rows shares the same predicate, rather than each
+// query author having to remember to repeat it by hand.
+const activeKeyFilter = "revoked_at IS NULL"
+
 // ErrKeyIDCollision indicates the generated Key ID already exists. Callers
 // should generate a new key and retry.
 var ErrKeyIDCollision = errors.New("key id already exists")
@@ -61,9 +66,9 @@ func (s *Store) Create(ctx context.Context, keyID, secretHash, owner string, exp
 func (s *Store) Get(ctx context.Context, keyID string) (Record, string, error) {
 	var rec Record
 	var secretHash string
-	err := s.db.QueryRowContext(ctx, `
-		SELECT key_id, owner, created_at, expires_at, secret_hash FROM keys WHERE key_id = $1 AND revoked_at IS NULL
-	`, keyID).Scan(&rec.KeyID, &rec.Owner, &rec.CreatedAt, &rec.ExpiresAt, &secretHash)
+	err := s.db.QueryRowContext(ctx, fmt.Sprintf(`
+		SELECT key_id, owner, created_at, expires_at, secret_hash FROM keys WHERE key_id = $1 AND %s
+	`, activeKeyFilter), keyID).Scan(&rec.KeyID, &rec.Owner, &rec.CreatedAt, &rec.ExpiresAt, &secretHash)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return Record{}, "", ErrKeyNotFound
@@ -76,9 +81,9 @@ func (s *Store) Get(ctx context.Context, keyID string) (Record, string, error) {
 // List returns metadata for every non-revoked key, most recently created
 // first.
 func (s *Store) List(ctx context.Context) ([]Record, error) {
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT key_id, owner, created_at, expires_at FROM keys WHERE revoked_at IS NULL ORDER BY created_at DESC
-	`)
+	rows, err := s.db.QueryContext(ctx, fmt.Sprintf(`
+		SELECT key_id, owner, created_at, expires_at FROM keys WHERE %s ORDER BY created_at DESC
+	`, activeKeyFilter))
 	if err != nil {
 		return nil, fmt.Errorf("querying keys: %w", err)
 	}
@@ -103,9 +108,9 @@ func (s *Store) List(ctx context.Context) ([]Record, error) {
 // exists with the given Key ID — including one already revoked, which by
 // this point is indistinguishable from nonexistent to a caller.
 func (s *Store) Revoke(ctx context.Context, keyID string) error {
-	result, err := s.db.ExecContext(ctx, `
-		UPDATE keys SET revoked_at = now() WHERE key_id = $1 AND revoked_at IS NULL
-	`, keyID)
+	result, err := s.db.ExecContext(ctx, fmt.Sprintf(`
+		UPDATE keys SET revoked_at = now() WHERE key_id = $1 AND %s
+	`, activeKeyFilter), keyID)
 	if err != nil {
 		return fmt.Errorf("revoking key: %w", err)
 	}

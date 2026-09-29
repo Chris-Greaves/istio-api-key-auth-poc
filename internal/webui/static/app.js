@@ -22,7 +22,7 @@ async function loadKeys() {
 		const revokeButton = document.createElement("button");
 		revokeButton.type = "button";
 		revokeButton.textContent = "Revoke";
-		revokeButton.addEventListener("click", () => revokeKey(key.key_id));
+		revokeButton.addEventListener("click", () => revokeKey(key.key_id, revokeButton));
 		actionCell.appendChild(revokeButton);
 		row.appendChild(actionCell);
 
@@ -30,7 +30,7 @@ async function loadKeys() {
 	}
 }
 
-async function revokeKey(keyID) {
+async function revokeKey(keyID, button) {
 	const errorEl = document.getElementById("revoke-key-error");
 	errorEl.hidden = true;
 
@@ -38,12 +38,19 @@ async function revokeKey(keyID) {
 		return;
 	}
 
+	// Disabled for the duration of the request so a second click (e.g. a
+	// double-click, or one queued while the first request is in flight)
+	// can't fire a duplicate DELETE against a key the first request already
+	// revoked.
+	button.disabled = true;
+
 	let res;
 	try {
 		res = await fetch(`/api/keys/${encodeURIComponent(keyID)}`, { method: "DELETE" });
 	} catch {
 		errorEl.textContent = "Failed to reach the server.";
 		errorEl.hidden = false;
+		button.disabled = false;
 		return;
 	}
 
@@ -51,6 +58,7 @@ async function revokeKey(keyID) {
 		const data = await res.json().catch(() => ({}));
 		errorEl.textContent = data.error || "Failed to revoke key.";
 		errorEl.hidden = false;
+		button.disabled = false;
 		return;
 	}
 
