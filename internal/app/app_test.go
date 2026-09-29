@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -20,6 +21,7 @@ import (
 
 	"github.com/Chris-Greaves/istio-api-key-auth-poc/internal/app"
 	"github.com/Chris-Greaves/istio-api-key-auth-poc/internal/config"
+	"github.com/Chris-Greaves/istio-api-key-auth-poc/internal/metricsquery"
 )
 
 func startPostgres(t *testing.T) string {
@@ -59,7 +61,7 @@ func TestApp_HealthyAndSchemaMigratedAfterStartup(t *testing.T) {
 	connStr := startPostgres(t)
 	ctx := context.Background()
 
-	application, err := app.New(ctx, config.Config{DatabaseURL: connStr})
+	application, err := app.New(ctx, config.Config{DatabaseURL: connStr}, nil)
 	if err != nil {
 		t.Fatalf("starting application: %v", err)
 	}
@@ -104,7 +106,7 @@ func TestApp_HealthzReportsUnhealthyOnceDatabaseIsClosed(t *testing.T) {
 	connStr := startPostgres(t)
 	ctx := context.Background()
 
-	application, err := app.New(ctx, config.Config{DatabaseURL: connStr})
+	application, err := app.New(ctx, config.Config{DatabaseURL: connStr}, nil)
 	if err != nil {
 		t.Fatalf("starting application: %v", err)
 	}
@@ -133,7 +135,7 @@ func startServer(t *testing.T) *httptest.Server {
 	t.Helper()
 
 	connStr := startPostgres(t)
-	application, err := app.New(context.Background(), config.Config{DatabaseURL: connStr})
+	application, err := app.New(context.Background(), config.Config{DatabaseURL: connStr}, nil)
 	if err != nil {
 		t.Fatalf("starting application: %v", err)
 	}
@@ -709,13 +711,149 @@ func TestApp_MetricsExposesCheckDecisionsCounterPerKeyIDFromRealTraffic(t *testi
 	}
 }
 
+// fakeMetricsQuerier is the in-memory MetricsQuerier stub ticket 06 calls
+// for: it lets these tests exercise the usage-graph endpoint through the
+// fully wired binary without standing up a real Prometheus.
+type fakeMetricsQuerier struct {
+	points []metricsquery.Point
+	err    error
+}
+
+func (f fakeMetricsQuerier) QueryRange(ctx context.Context, keyID string, r metricsquery.TimeRange) ([]metricsquery.Point, error) {
+	return f.points, f.err
+}
+
+func startServerWithQuerier(t *testing.T, querier metricsquery.MetricsQuerier) *httptest.Server {
+	t.Helper()
+
+	connStr := startPostgres(t)
+	application, err := app.New(context.Background(), config.Config{DatabaseURL: connStr}, querier)
+	if err != nil {
+		t.Fatalf("starting application: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := application.Close(); err != nil {
+			t.Logf("closing application: %v", err)
+		}
+	})
+
+	server := httptest.NewServer(application.Handler())
+	t.Cleanup(server.Close)
+	return server
+}
+
+func getUsage(t *testing.T, server *httptest.Server, keyID, query string) (int, string) {
+	t.Helper()
+
+	url := server.URL + "/api/keys/" + keyID + "/usage"
+	if query != "" {
+		url += "?" + query
+	}
+
+	resp, err := http.Get(url)
+	if err != nil {
+		t.Fatalf("calling get-usage: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("reading get-usage response: %v", err)
+	}
+	return resp.StatusCode, string(body)
+}
+
+func TestApp_UsageEndpointReturnsTheStubbedMetricsQuerierTimeSeries(t *testing.T) {
+	points := []metricsquery.Point{
+		{Time: time.Unix(1000, 0).UTC(), Value: 0.5},
+		{Time: time.Unix(1060, 0).UTC(), Value: 1.5},
+	}
+	server := startServerWithQuerier(t, fakeMetricsQuerier{points: points})
+
+	status, body := getUsage(t, server, "anykeyid", "")
+
+	if status != http.StatusOK {
+		t.Fatalf("expected get-usage to return %d, got %d: %s", http.StatusOK, status, body)
+	}
+
+	var got []struct {
+		Timestamp time.Time `json:"timestamp"`
+		Value     float64   `json:"value"`
+	}
+	if err := json.Unmarshal([]byte(body), &got); err != nil {
+		t.Fatalf("decoding get-usage response: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 points, got %d: %s", len(got), body)
+	}
+	if !got[0].Timestamp.Equal(points[0].Time) || got[0].Value != points[0].Value {
+		t.Fatalf("unexpected first point: %+v", got[0])
+	}
+	if !got[1].Timestamp.Equal(points[1].Time) || got[1].Value != points[1].Value {
+		t.Fatalf("unexpected second point: %+v", got[1])
+	}
+}
+
+func TestApp_UsageEndpointReturnsAnEmptyListForAKeyWithNoTraffic(t *testing.T) {
+	server := startServerWithQuerier(t, fakeMetricsQuerier{points: nil})
+
+	status, body := getUsage(t, server, "anykeyid", "")
+
+	if status != http.StatusOK {
+		t.Fatalf("expected get-usage to return %d, got %d: %s", http.StatusOK, status, body)
+	}
+	if strings.TrimSpace(body) != "[]" {
+		t.Fatalf("expected an empty JSON array, got %s", body)
+	}
+}
+
+func TestApp_UsageEndpointReturnsServiceUnavailableWhenPrometheusIsUnreachable(t *testing.T) {
+	server := startServerWithQuerier(t, fakeMetricsQuerier{err: errors.New("dial tcp: connection refused")})
+
+	status, _ := getUsage(t, server, "anykeyid", "")
+
+	if status != http.StatusServiceUnavailable {
+		t.Fatalf("expected get-usage to return %d when Prometheus is unreachable, got %d", http.StatusServiceUnavailable, status)
+	}
+}
+
+func TestApp_UsageEndpointRejectsAnEndBeforeStart(t *testing.T) {
+	server := startServerWithQuerier(t, fakeMetricsQuerier{})
+
+	status, _ := getUsage(t, server, "anykeyid", "start=2026-01-01T01:00:00Z&end=2026-01-01T00:00:00Z")
+
+	if status != http.StatusBadRequest {
+		t.Fatalf("expected get-usage with end before start to return %d, got %d", http.StatusBadRequest, status)
+	}
+}
+
+func TestApp_UsageEndpointRejectsAMalformedStartTimestamp(t *testing.T) {
+	server := startServerWithQuerier(t, fakeMetricsQuerier{})
+
+	status, _ := getUsage(t, server, "anykeyid", "start=not-a-timestamp")
+
+	if status != http.StatusBadRequest {
+		t.Fatalf("expected get-usage with a malformed start to return %d, got %d", http.StatusBadRequest, status)
+	}
+}
+
+func TestApp_UsageEndpointRejectsARangeExceedingTheMaxResolution(t *testing.T) {
+	server := startServerWithQuerier(t, fakeMetricsQuerier{})
+
+	status, _ := getUsage(t, server, "anykeyid", "start=2026-01-01T00:00:00Z&end=2026-02-01T00:00:00Z&step=1s")
+
+	if status != http.StatusBadRequest {
+		t.Fatalf("expected get-usage with an excessive number of samples to return %d, got %d", http.StatusBadRequest, status)
+	}
+}
+
 func TestNew_FailsFastWhenDatabaseIsUnreachable(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	_, err := app.New(ctx, config.Config{
 		DatabaseURL: "postgres://user:pass@127.0.0.1:1/nonexistent?sslmode=disable",
-	})
+	}, nil)
 	if err == nil {
 		t.Fatal("expected an error when the database is unreachable, got nil")
 	}

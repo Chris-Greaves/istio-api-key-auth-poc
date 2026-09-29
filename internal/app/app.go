@@ -10,6 +10,7 @@ import (
 	"github.com/Chris-Greaves/istio-api-key-auth-poc/internal/config"
 	"github.com/Chris-Greaves/istio-api-key-auth-poc/internal/database"
 	"github.com/Chris-Greaves/istio-api-key-auth-poc/internal/httpapi"
+	"github.com/Chris-Greaves/istio-api-key-auth-poc/internal/metricsquery"
 	"github.com/Chris-Greaves/istio-api-key-auth-poc/internal/telemetry"
 )
 
@@ -22,7 +23,12 @@ type App struct {
 // New connects to Postgres, applies schema migrations, and wires up the HTTP handler.
 // It returns an error rather than a partially-started App if the database is
 // unreachable or migrations fail, so callers never serve traffic against a broken schema.
-func New(ctx context.Context, cfg config.Config) (*App, error) {
+//
+// If querier is nil, a Prometheus-backed MetricsQuerier is built from
+// cfg.PrometheusURL; ticket 06's tests pass an in-memory fake instead, to
+// stub Prometheus responses while still exercising the rest of the fully
+// wired binary.
+func New(ctx context.Context, cfg config.Config, querier metricsquery.MetricsQuerier) (*App, error) {
 	db, err := database.Connect(ctx, cfg.DatabaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("connecting to database: %w", err)
@@ -39,9 +45,13 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 		return nil, fmt.Errorf("setting up telemetry: %w", err)
 	}
 
+	if querier == nil {
+		querier = metricsquery.NewPrometheusQuerier(cfg.PrometheusURL)
+	}
+
 	return &App{
 		db:      db,
-		handler: httpapi.NewRouter(db, metrics.Handler),
+		handler: httpapi.NewRouter(db, metrics.Handler, querier),
 	}, nil
 }
 

@@ -77,6 +77,23 @@ code {
 }
 
 #key-list-body button {
+	margin-right: 0.4rem;
+}
+
+#key-list-body button.revoke {
 	color: #b00020;
 	border-color: #b00020;
+	margin-right: 0;
+}
+
+#key-usage canvas {
+	display: block;
+	max-width: 100%;
+	border: 1px solid #ddd;
+	border-radius: 4px;
+	background: #fafafa;
+}
+
+#key-usage button {
+	margin-top: 0.75rem;
 }

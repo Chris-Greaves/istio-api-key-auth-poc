@@ -27,7 +27,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	application, err := app.New(ctx, cfg)
+	application, err := app.New(ctx, cfg, nil)
 	if err != nil {
 		logger.Error("failed to start application", "error", err)
 		os.Exit(1)

@@ -39,3 +39,29 @@ func TestLoad_DefaultsListenAddr(t *testing.T) {
 		t.Fatalf("expected default ListenAddr %q, got %q", ":8080", cfg.ListenAddr)
 	}
 }
+
+func TestLoad_ReadsPrometheusURLFromEnvironment(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://example")
+	t.Setenv("PROMETHEUS_URL", "http://prometheus:9090")
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.PrometheusURL != "http://prometheus:9090" {
+		t.Fatalf("expected PrometheusURL %q, got %q", "http://prometheus:9090", cfg.PrometheusURL)
+	}
+}
+
+func TestLoad_DoesNotRequirePrometheusURL(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://example")
+	t.Setenv("PROMETHEUS_URL", "")
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.PrometheusURL != "" {
+		t.Fatalf("expected empty PrometheusURL by default, got %q", cfg.PrometheusURL)
+	}
+}

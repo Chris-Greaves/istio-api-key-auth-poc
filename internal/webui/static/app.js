@@ -19,11 +19,20 @@ async function loadKeys() {
 		}
 
 		const actionCell = document.createElement("td");
+
+		const usageButton = document.createElement("button");
+		usageButton.type = "button";
+		usageButton.textContent = "Usage";
+		usageButton.addEventListener("click", () => showUsage(key.key_id));
+		actionCell.appendChild(usageButton);
+
 		const revokeButton = document.createElement("button");
 		revokeButton.type = "button";
+		revokeButton.className = "revoke";
 		revokeButton.textContent = "Revoke";
 		revokeButton.addEventListener("click", () => revokeKey(key.key_id, revokeButton));
 		actionCell.appendChild(revokeButton);
+
 		row.appendChild(actionCell);
 
 		tbody.appendChild(row);
@@ -157,6 +166,93 @@ document.getElementById("test-key-form").addEventListener("submit", async (event
 		resultEl.classList.add("invalid");
 	}
 	resultEl.hidden = false;
+});
+
+// showUsage fetches a key's usage graph, sourced live from Prometheus by the
+// backend (ADR-0004) rather than anything stored in Postgres, and renders it
+// as a simple line chart. A non-2xx response (the backend's degraded state
+// for an unreachable Prometheus) is shown as an error rather than a graph.
+async function showUsage(keyID) {
+	const section = document.getElementById("key-usage");
+	const loadingEl = document.getElementById("usage-loading");
+	const errorEl = document.getElementById("usage-error");
+	const emptyEl = document.getElementById("usage-empty");
+	const canvas = document.getElementById("usage-canvas");
+
+	document.getElementById("usage-key-id").textContent = keyID;
+	section.hidden = false;
+	loadingEl.hidden = false;
+	errorEl.hidden = true;
+	emptyEl.hidden = true;
+	canvas.getContext("2d").clearRect(0, 0, canvas.width, canvas.height);
+
+	let res;
+	try {
+		res = await fetch(`/api/keys/${encodeURIComponent(keyID)}/usage`);
+	} catch {
+		loadingEl.hidden = true;
+		errorEl.textContent = "Failed to reach the server.";
+		errorEl.hidden = false;
+		return;
+	}
+
+	loadingEl.hidden = true;
+
+	if (!res.ok) {
+		const data = await res.json().catch(() => ({}));
+		errorEl.textContent = data.error || "Usage data is currently unavailable.";
+		errorEl.hidden = false;
+		return;
+	}
+
+	const points = await res.json();
+	if (points.length === 0) {
+		emptyEl.hidden = false;
+		return;
+	}
+
+	drawUsageChart(canvas, points);
+}
+
+function drawUsageChart(canvas, points) {
+	const ctx = canvas.getContext("2d");
+	const { width, height } = canvas;
+	const padding = 24;
+
+	ctx.clearRect(0, 0, width, height);
+
+	ctx.strokeStyle = "#888";
+	ctx.lineWidth = 1;
+	ctx.beginPath();
+	ctx.moveTo(padding, padding);
+	ctx.lineTo(padding, height - padding);
+	ctx.lineTo(width - padding, height - padding);
+	ctx.stroke();
+
+	// maxValue is floored at a small positive number so a fully idle key
+	// (every value 0) still draws a flat line at the axis instead of dividing
+	// by zero.
+	const maxValue = Math.max(...points.map((p) => p.value), 0.0001);
+	const plotWidth = width - padding * 2;
+	const plotHeight = height - padding * 2;
+
+	ctx.strokeStyle = "#2a6ebb";
+	ctx.lineWidth = 2;
+	ctx.beginPath();
+	points.forEach((point, i) => {
+		const x = padding + (plotWidth * i) / Math.max(points.length - 1, 1);
+		const y = height - padding - (plotHeight * point.value) / maxValue;
+		if (i === 0) {
+			ctx.moveTo(x, y);
+		} else {
+			ctx.lineTo(x, y);
+		}
+	});
+	ctx.stroke();
+}
+
+document.getElementById("usage-close").addEventListener("click", () => {
+	document.getElementById("key-usage").hidden = true;
 });
 
 loadKeys();
