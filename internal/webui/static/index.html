@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<title>API Key Authenticator</title>
+	<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+	<h1>API Keys</h1>
+
+	<section id="create-key">
+		<h2>Create a new key</h2>
+		<form id="create-key-form">
+			<label for="owner">Owner</label>
+			<input id="owner" name="owner" type="text" required />
+
+			<label for="expires-at">Expiry (optional)</label>
+			<input id="expires-at" name="expires_at" type="date" />
+
+			<button type="submit">Create key</button>
+		</form>
+
+		<p id="create-key-error" class="error" hidden></p>
+
+		<div id="new-key-banner" hidden>
+			<p>
+				This is the only time this key will be shown. Copy it now
+				&mdash; it cannot be retrieved later.
+			</p>
+			<code id="new-key-value"></code>
+		</div>
+	</section>
+
+	<section id="key-list">
+		<h2>Existing keys</h2>
+		<table>
+			<thead>
+				<tr>
+					<th>Key ID</th>
+					<th>Owner</th>
+					<th>Created</th>
+					<th>Expires</th>
+				</tr>
+			</thead>
+			<tbody id="key-list-body"></tbody>
+		</table>
+	</section>
+
+	<script src="app.js"></script>
+</body>
+</html>

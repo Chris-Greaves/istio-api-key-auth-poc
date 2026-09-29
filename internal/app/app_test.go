@@ -1,10 +1,15 @@
 package app_test
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -119,6 +124,166 @@ func TestApp_HealthzReportsUnhealthyOnceDatabaseIsClosed(t *testing.T) {
 
 	if resp.StatusCode != http.StatusServiceUnavailable {
 		t.Fatalf("expected /healthz to return %d once the database connection is closed, got %d", http.StatusServiceUnavailable, resp.StatusCode)
+	}
+}
+
+var fullKeyPattern = regexp.MustCompile(`^api_[a-z0-9]{8}_[a-z0-9]{32}$`)
+
+func startServer(t *testing.T) *httptest.Server {
+	t.Helper()
+
+	connStr := startPostgres(t)
+	application, err := app.New(context.Background(), config.Config{DatabaseURL: connStr})
+	if err != nil {
+		t.Fatalf("starting application: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := application.Close(); err != nil {
+			t.Logf("closing application: %v", err)
+		}
+	})
+
+	server := httptest.NewServer(application.Handler())
+	t.Cleanup(server.Close)
+	return server
+}
+
+type keyResponse struct {
+	Key       string  `json:"key"`
+	KeyID     string  `json:"key_id"`
+	Owner     string  `json:"owner"`
+	CreatedAt string  `json:"created_at"`
+	ExpiresAt *string `json:"expires_at"`
+}
+
+func TestApp_CreateKeyReturnsFullKeyOnceAndTheKeyThenAppearsInTheList(t *testing.T) {
+	server := startServer(t)
+
+	createResp, err := http.Post(
+		server.URL+"/api/keys",
+		"application/json",
+		strings.NewReader(`{"owner":"test-owner"}`),
+	)
+	if err != nil {
+		t.Fatalf("calling create-key: %v", err)
+	}
+	defer createResp.Body.Close()
+
+	if createResp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected create-key to return %d, got %d", http.StatusCreated, createResp.StatusCode)
+	}
+
+	var created keyResponse
+	if err := json.NewDecoder(createResp.Body).Decode(&created); err != nil {
+		t.Fatalf("decoding create-key response: %v", err)
+	}
+
+	if !fullKeyPattern.MatchString(created.Key) {
+		t.Fatalf("expected returned key to match %q, got %q", fullKeyPattern.String(), created.Key)
+	}
+	if created.Owner != "test-owner" {
+		t.Fatalf("expected owner %q, got %q", "test-owner", created.Owner)
+	}
+	if created.KeyID == "" {
+		t.Fatal("expected a non-empty key id")
+	}
+
+	listResp, err := http.Get(server.URL + "/api/keys")
+	if err != nil {
+		t.Fatalf("calling list-keys: %v", err)
+	}
+	defer listResp.Body.Close()
+
+	if listResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected list-keys to return %d, got %d", http.StatusOK, listResp.StatusCode)
+	}
+
+	body, err := io.ReadAll(listResp.Body)
+	if err != nil {
+		t.Fatalf("reading list-keys response: %v", err)
+	}
+
+	var listed []keyResponse
+	if err := json.Unmarshal(body, &listed); err != nil {
+		t.Fatalf("decoding list-keys response: %v", err)
+	}
+
+	found := false
+	for _, k := range listed {
+		if k.KeyID == created.KeyID {
+			found = true
+			if k.Owner != "test-owner" {
+				t.Fatalf("expected listed owner %q, got %q", "test-owner", k.Owner)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected created key %q to appear in the list, got %+v", created.KeyID, listed)
+	}
+
+	var rawListed []map[string]any
+	if err := json.Unmarshal(body, &rawListed); err != nil {
+		t.Fatalf("decoding list-keys response as raw JSON: %v", err)
+	}
+	rawFound := false
+	for _, k := range rawListed {
+		if k["key_id"] != created.KeyID {
+			continue
+		}
+		rawFound = true
+		expiresAt, present := k["expires_at"]
+		if !present {
+			t.Fatal("expected expires_at to be present (as null) for a key with no expiry, but the field was omitted")
+		}
+		if expiresAt != nil {
+			t.Fatalf("expected expires_at to be null for a key with no expiry, got %v", expiresAt)
+		}
+	}
+	if !rawFound {
+		t.Fatalf("expected created key %q to appear in the raw list response", created.KeyID)
+	}
+
+	if strings.Contains(string(body), created.Key) {
+		t.Fatal("expected list-keys response to never contain the full plaintext key")
+	}
+	if bytes.Contains(body, []byte("secret")) {
+		t.Fatal("expected list-keys response to never mention the secret or its hash")
+	}
+}
+
+func TestApp_CreateKeyWithoutOwnerIsRejected(t *testing.T) {
+	server := startServer(t)
+
+	resp, err := http.Post(
+		server.URL+"/api/keys",
+		"application/json",
+		strings.NewReader(`{}`),
+	)
+	if err != nil {
+		t.Fatalf("calling create-key: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected create-key without an owner to return %d, got %d", http.StatusBadRequest, resp.StatusCode)
+	}
+}
+
+func TestApp_CreateKeyWithWhitespaceOnlyOwnerIsRejected(t *testing.T) {
+	server := startServer(t)
+
+	resp, err := http.Post(
+		server.URL+"/api/keys",
+		"application/json",
+		strings.NewReader(`{"owner":"   "}`),
+	)
+	if err != nil {
+		t.Fatalf("calling create-key: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected create-key with a whitespace-only owner to return %d, got %d", http.StatusBadRequest, resp.StatusCode)
 	}
 }
 
