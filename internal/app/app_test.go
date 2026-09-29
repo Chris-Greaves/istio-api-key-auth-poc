@@ -287,6 +287,169 @@ func TestApp_CreateKeyWithWhitespaceOnlyOwnerIsRejected(t *testing.T) {
 	}
 }
 
+func createTestKey(t *testing.T, server *httptest.Server, requestBody string) keyResponse {
+	t.Helper()
+
+	resp, err := http.Post(server.URL+"/api/keys", "application/json", strings.NewReader(requestBody))
+	if err != nil {
+		t.Fatalf("calling create-key: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected create-key to return %d, got %d", http.StatusCreated, resp.StatusCode)
+	}
+
+	var created keyResponse
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+		t.Fatalf("decoding create-key response: %v", err)
+	}
+	return created
+}
+
+type validateKeyResponse struct {
+	Valid  bool   `json:"valid"`
+	Reason string `json:"reason"`
+	Owner  string `json:"owner"`
+}
+
+func validateTestKey(t *testing.T, server *httptest.Server, key string) (int, validateKeyResponse) {
+	t.Helper()
+
+	body, err := json.Marshal(map[string]string{"key": key})
+	if err != nil {
+		t.Fatalf("marshaling validate-key request: %v", err)
+	}
+
+	resp, err := http.Post(server.URL+"/api/keys/validate", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("calling validate-key: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var result validateKeyResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatalf("decoding validate-key response: %v", err)
+	}
+	return resp.StatusCode, result
+}
+
+func TestApp_ValidateKeyAcceptsAValidActiveKey(t *testing.T) {
+	server := startServer(t)
+	created := createTestKey(t, server, `{"owner":"validate-owner"}`)
+
+	status, result := validateTestKey(t, server, created.Key)
+
+	if status != http.StatusOK {
+		t.Fatalf("expected validate-key to return %d, got %d", http.StatusOK, status)
+	}
+	if !result.Valid {
+		t.Fatalf("expected a freshly created key to be valid, got reason %q", result.Reason)
+	}
+	if result.Owner != "validate-owner" {
+		t.Fatalf("expected owner %q, got %q", "validate-owner", result.Owner)
+	}
+}
+
+func TestApp_ValidateKeyToleratesSurroundingWhitespace(t *testing.T) {
+	server := startServer(t)
+	created := createTestKey(t, server, `{"owner":"validate-owner"}`)
+
+	status, result := validateTestKey(t, server, "  "+created.Key+"\n")
+
+	if status != http.StatusOK {
+		t.Fatalf("expected validate-key to return %d, got %d", http.StatusOK, status)
+	}
+	if !result.Valid {
+		t.Fatalf("expected a valid key with surrounding whitespace to still validate, got reason %q", result.Reason)
+	}
+}
+
+func TestApp_ValidateKeyRejectsAWrongSecret(t *testing.T) {
+	server := startServer(t)
+	created := createTestKey(t, server, `{"owner":"validate-owner"}`)
+
+	tampered := created.Key[:len(created.Key)-1] + "0"
+	if tampered == created.Key {
+		tampered = created.Key[:len(created.Key)-1] + "1"
+	}
+
+	status, result := validateTestKey(t, server, tampered)
+
+	if status != http.StatusOK {
+		t.Fatalf("expected validate-key to return %d, got %d", http.StatusOK, status)
+	}
+	if result.Valid {
+		t.Fatal("expected a key with a tampered secret to be invalid")
+	}
+	if result.Reason != "invalid key" {
+		t.Fatalf("expected a generic invalid-key reason, got %q", result.Reason)
+	}
+}
+
+func TestApp_ValidateKeyRejectsAnUnknownKeyID(t *testing.T) {
+	server := startServer(t)
+
+	status, result := validateTestKey(t, server, "api_00000000_"+strings.Repeat("a", 32))
+
+	if status != http.StatusOK {
+		t.Fatalf("expected validate-key to return %d, got %d", http.StatusOK, status)
+	}
+	if result.Valid {
+		t.Fatal("expected an unknown key id to be invalid")
+	}
+	if result.Reason != "invalid key" {
+		t.Fatalf("expected a generic invalid-key reason, got %q", result.Reason)
+	}
+}
+
+func TestApp_ValidateKeyRejectsAMalformedKey(t *testing.T) {
+	server := startServer(t)
+
+	status, result := validateTestKey(t, server, "not-a-key")
+
+	if status != http.StatusOK {
+		t.Fatalf("expected validate-key to return %d, got %d", http.StatusOK, status)
+	}
+	if result.Valid {
+		t.Fatal("expected a malformed key to be invalid")
+	}
+	if result.Reason != "invalid key" {
+		t.Fatalf("expected a generic invalid-key reason, got %q", result.Reason)
+	}
+}
+
+func TestApp_ValidateKeyRejectsAnExpiredKey(t *testing.T) {
+	server := startServer(t)
+	created := createTestKey(t, server, `{"owner":"validate-owner","expires_at":"2020-01-01T00:00:00Z"}`)
+
+	status, result := validateTestKey(t, server, created.Key)
+
+	if status != http.StatusOK {
+		t.Fatalf("expected validate-key to return %d, got %d", http.StatusOK, status)
+	}
+	if result.Valid {
+		t.Fatal("expected an expired key to be invalid")
+	}
+	if result.Reason != "key has expired" {
+		t.Fatalf("expected reason %q, got %q", "key has expired", result.Reason)
+	}
+}
+
+func TestApp_ValidateKeyRequiresAKey(t *testing.T) {
+	server := startServer(t)
+
+	resp, err := http.Post(server.URL+"/api/keys/validate", "application/json", strings.NewReader(`{}`))
+	if err != nil {
+		t.Fatalf("calling validate-key: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected validate-key without a key to return %d, got %d", http.StatusBadRequest, resp.StatusCode)
+	}
+}
+
 func TestNew_FailsFastWhenDatabaseIsUnreachable(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

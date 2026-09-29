@@ -47,11 +47,18 @@ document.getElementById("create-key-form").addEventListener("submit", async (eve
 		body.expires_at = new Date(form.expires_at.value).toISOString();
 	}
 
-	const res = await fetch("/api/keys", {
-		method: "POST",
-		headers: { "Content-Type": "application/json" },
-		body: JSON.stringify(body),
-	});
+	let res;
+	try {
+		res = await fetch("/api/keys", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify(body),
+		});
+	} catch {
+		errorEl.textContent = "Failed to reach the server.";
+		errorEl.hidden = false;
+		return;
+	}
 
 	const data = await res.json().catch(() => ({}));
 
@@ -65,6 +72,47 @@ document.getElementById("create-key-form").addEventListener("submit", async (eve
 	bannerEl.hidden = false;
 	form.reset();
 	loadKeys();
+});
+
+document.getElementById("test-key-form").addEventListener("submit", async (event) => {
+	event.preventDefault();
+
+	const resultEl = document.getElementById("test-key-result");
+	resultEl.hidden = true;
+	resultEl.className = "key-test-result";
+
+	const form = event.target;
+	let res;
+	try {
+		res = await fetch("/api/keys/validate", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ key: form.key.value }),
+		});
+	} catch {
+		resultEl.textContent = "Failed to reach the server.";
+		resultEl.classList.add("invalid");
+		resultEl.hidden = false;
+		return;
+	}
+
+	const data = await res.json().catch(() => ({}));
+
+	if (!res.ok) {
+		resultEl.textContent = data.error || "Failed to test key.";
+		resultEl.classList.add("invalid");
+		resultEl.hidden = false;
+		return;
+	}
+
+	if (data.valid) {
+		resultEl.textContent = `Valid — owned by "${data.owner}".`;
+		resultEl.classList.add("valid");
+	} else {
+		resultEl.textContent = `Invalid — ${data.reason}.`;
+		resultEl.classList.add("invalid");
+	}
+	resultEl.hidden = false;
 });
 
 loadKeys();

@@ -1,7 +1,6 @@
 package httpapi
 
 import (
-	"encoding/json"
 	"net/http"
 	"strings"
 	"time"
@@ -44,11 +43,8 @@ func toKeyResponse(rec keys.Record) keyResponse {
 
 func createKeyHandler(store *keys.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		r.Body = http.MaxBytesReader(w, r.Body, maxCreateKeyBodyBytes)
-
 		var req createKeyRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeJSONError(w, http.StatusBadRequest, "invalid request body")
+		if !decodeJSONBody(w, r, maxCreateKeyBodyBytes, &req) {
 			return
 		}
 

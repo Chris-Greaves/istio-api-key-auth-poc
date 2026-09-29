@@ -23,6 +23,9 @@ type Record struct {
 // should generate a new key and retry.
 var ErrKeyIDCollision = errors.New("key id already exists")
 
+// ErrKeyNotFound indicates no key exists with the given Key ID.
+var ErrKeyNotFound = errors.New("key not found")
+
 // Store persists API key metadata in Postgres.
 type Store struct {
 	db *sql.DB
@@ -48,6 +51,24 @@ func (s *Store) Create(ctx context.Context, keyID, secretHash, owner string, exp
 		return Record{}, fmt.Errorf("inserting key: %w", err)
 	}
 	return rec, nil
+}
+
+// Get looks up a single key by its Key ID, returning its metadata alongside
+// its secret hash for validation. It returns ErrKeyNotFound if no such key
+// exists.
+func (s *Store) Get(ctx context.Context, keyID string) (Record, string, error) {
+	var rec Record
+	var secretHash string
+	err := s.db.QueryRowContext(ctx, `
+		SELECT key_id, owner, created_at, expires_at, secret_hash FROM keys WHERE key_id = $1
+	`, keyID).Scan(&rec.KeyID, &rec.Owner, &rec.CreatedAt, &rec.ExpiresAt, &secretHash)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return Record{}, "", ErrKeyNotFound
+		}
+		return Record{}, "", fmt.Errorf("querying key: %w", err)
+	}
+	return rec, secretHash, nil
 }
 
 // List returns metadata for every key, most recently created first.
