@@ -37,7 +37,7 @@ func nextManagementOp(i int) string {
 // Like the check stream, this is open-loop — ticker-driven against interval
 // rather than tied to response latency — so a slow or hanging call never
 // throttles the stream's rate; each call runs in its own goroutine.
-func runManagementStream(ctx context.Context, logger *slog.Logger, client *apiClient, pool *Pool, interval time.Duration) {
+func runManagementStream(ctx context.Context, logger *slog.Logger, client *apiClient, pool *Pool, interval time.Duration, stats *Stats) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
@@ -59,7 +59,10 @@ func runManagementStream(ctx context.Context, logger *slog.Logger, client *apiCl
 							return
 						}
 						logger.Warn("management list call failed", "error", err)
+						stats.RecordManagementFailed("list")
+						return
 					}
+					stats.RecordManagementSent("list")
 				})
 
 			case "create":
@@ -70,8 +73,10 @@ func runManagementStream(ctx context.Context, logger *slog.Logger, client *apiCl
 							return
 						}
 						logger.Warn("management create call failed", "error", err)
+						stats.RecordManagementFailed("create")
 						return
 					}
+					stats.RecordManagementSent("create")
 					pool.Add(key)
 				})
 
@@ -79,6 +84,7 @@ func runManagementStream(ctx context.Context, logger *slog.Logger, client *apiCl
 				keyID, ok := pool.RandomKeyID(rng)
 				if !ok {
 					logger.Warn("pool is empty, skipping revoke")
+					stats.RecordManagementFailed("revoke")
 					break
 				}
 
@@ -89,9 +95,13 @@ func runManagementStream(ctx context.Context, logger *slog.Logger, client *apiCl
 						}
 						if !errors.Is(err, ErrKeyNotFound) {
 							logger.Warn("management revoke call failed", "key_id", keyID, "error", err)
+							stats.RecordManagementFailed("revoke")
+							return
 						}
+						stats.RecordManagementSent("revoke")
 						return
 					}
+					stats.RecordManagementSent("revoke")
 					pool.Remove(keyID)
 				})
 			}

@@ -135,6 +135,31 @@ func (c *apiClient) revokeKey(ctx context.Context, keyID string) error {
 	}
 }
 
+// scrapeMetrics fetches the service's /metrics endpoint and returns its body
+// as Prometheus exposition-format text, for the final summary's metrics
+// diff.
+func (c *apiClient) scrapeMetrics(ctx context.Context) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/metrics", nil)
+	if err != nil {
+		return "", fmt.Errorf("building metrics request: %w", err)
+	}
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("calling metrics: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("reading metrics response: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("metrics returned %s: %s", resp.Status, bytes.TrimSpace(body))
+	}
+	return string(body), nil
+}
+
 // check sends a single request to the Check Service's /authz/check endpoint,
 // presenting key via X-API-Key (or omitting the header entirely when key is
 // empty), and returns the response status code.

@@ -135,18 +135,29 @@ func main() {
 	}
 	logger.Info("bootstrap complete", "base_url", cfg.baseURL, "pool_size", cfg.poolSize)
 
+	checkBaseline, managementBaseline := scrapeMetricsBaseline(ctx, logger, client)
+
+	stats := NewStats()
+
 	var wg sync.WaitGroup
 	wg.Go(func() {
 		logger.Info("check stream starting", "rate_per_sec", cfg.checkRate)
-		runCheckStream(ctx, logger, client, pool, expiredKey, cfg.weights, cfg.checkInterval)
+		runCheckStream(ctx, logger, client, pool, expiredKey, cfg.weights, cfg.checkInterval, stats)
 		logger.Info("check stream stopped")
 	})
 	wg.Go(func() {
 		logger.Info("management stream starting", "rate_per_min", cfg.managementRate)
-		runManagementStream(ctx, logger, client, pool, cfg.managementInterval)
+		runManagementStream(ctx, logger, client, pool, cfg.managementInterval, stats)
 		logger.Info("management stream stopped")
 	})
+	wg.Go(func() {
+		runProgressReporter(ctx, logger, stats)
+	})
 	wg.Wait()
+
+	summaryCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	runFinalSummary(summaryCtx, logger, client, stats, checkBaseline, managementBaseline)
 }
 
 // bootstrap stands up the shared pool of valid API Keys plus one dedicated
@@ -190,7 +201,7 @@ func bootstrap(ctx context.Context, client *apiClient, poolSize int) (*Pool, str
 // interval rather than tied to response latency — so a slow or hanging
 // response never throttles the send rate; each request runs in its own
 // goroutine.
-func runCheckStream(ctx context.Context, logger *slog.Logger, client *apiClient, pool *Pool, expiredKey string, weights Weights, interval time.Duration) {
+func runCheckStream(ctx context.Context, logger *slog.Logger, client *apiClient, pool *Pool, expiredKey string, weights Weights, interval time.Duration, stats *Stats) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
@@ -207,10 +218,12 @@ func runCheckStream(ctx context.Context, logger *slog.Logger, client *apiClient,
 			key, ok, err := resolveScenario(rng, scenario, pool, expiredKey)
 			if err != nil {
 				logger.Warn("failed to resolve check-mix scenario", "scenario", scenario, "error", err)
+				stats.RecordCheckFailed(scenario)
 				continue
 			}
 			if !ok {
 				logger.Warn("pool is empty, skipping valid check request")
+				stats.RecordCheckFailed(scenario)
 				continue
 			}
 
@@ -221,8 +234,10 @@ func runCheckStream(ctx context.Context, logger *slog.Logger, client *apiClient,
 						return
 					}
 					logger.Warn("check request failed", "scenario", scenario, "error", err)
+					stats.RecordCheckFailed(scenario)
 					return
 				}
+				stats.RecordCheckSent(scenario)
 				if status == scenario.expectedStatus() {
 					return
 				}
