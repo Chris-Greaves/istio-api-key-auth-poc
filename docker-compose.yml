@@ -17,12 +17,24 @@ services:
     build: .
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
+      PROMETHEUS_URL: http://prometheus:9090
     ports:
       - "8080:8080"
     depends_on:
       postgres:
         condition: service_healthy
     restart: on-failure
+
+  # Backs the Web UI's per-key usage graphs (ADR-0004), which query this
+  # server live rather than reading anything out of Postgres. Without it,
+  # PROMETHEUS_URL above has nothing to point at and the usage endpoint
+  # always reports 503.
+  prometheus:
+    image: prom/prometheus:v3.7.3
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
 
 volumes:
   postgres-data:

@@ -11,13 +11,13 @@ This repo contains a prototype API Key service, designed to work with Istio in a
 
 ## Running Locally with Docker
 
-Build the image and bring up the service alongside a Postgres instance with:
+Build the image and bring up the service alongside Postgres and Prometheus with:
 
 ```sh
 docker compose up --build
 ```
 
-This starts a `postgres:16-alpine` container and the service container, wiring `DATABASE_URL` between them. The service waits for Postgres to report healthy before starting, then applies its embedded schema migrations on boot.
+This starts a `postgres:16-alpine` container, a `prom/prometheus` container (scraping the service's `/metrics` every 5s, per `prometheus.yml`), and the service container, wiring `DATABASE_URL` and `PROMETHEUS_URL` between them. The service waits for Postgres to report healthy before starting, then applies its embedded schema migrations on boot. Prometheus backs the Web UI's per-key usage graphs (ADR-0004); without it, the Usage view reports "unavailable" (see `tools/telemetrygen` for generating traffic to see it populated).
 
 Once the stack is up, confirm the service is healthy (this also confirms migrations ran against the Compose Postgres instance):
 

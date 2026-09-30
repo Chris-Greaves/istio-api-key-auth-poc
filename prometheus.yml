@@ -1,0 +1,11 @@
+global:
+  # Short interval so the Web UI's usage graphs (default range: last hour at
+  # one-minute steps, see internal/httpapi/usage.go) have real samples to show
+  # shortly after the stack starts, rather than the default 1m interval's
+  # sparser data.
+  scrape_interval: 5s
+
+scrape_configs:
+  - job_name: istio-api-key-auth-poc
+    static_configs:
+      - targets: ["server:8080"]
