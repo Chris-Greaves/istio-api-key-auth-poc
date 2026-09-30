@@ -2,3 +2,6 @@
 *.exe
 *.test
 *.out
+
+# Vendored Helm subchart archives (fetched via `helm dependency build`); Chart.lock is committed.
+/charts/*/charts/*.tgz

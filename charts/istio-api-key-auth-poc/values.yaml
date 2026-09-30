@@ -1,0 +1,53 @@
+# Default values for istio-api-key-auth-poc.
+
+replicaCount: 1
+
+image:
+  repository: ghcr.io/chris-greaves/istio-api-key-auth-poc
+  pullPolicy: IfNotPresent
+  # Defaults to .Chart.AppVersion when unset.
+  tag: ""
+
+nameOverride: ""
+fullnameOverride: ""
+
+service:
+  # ClusterIP keeps the service (management Web UI, check endpoint, and
+  # /metrics all share this one port) unreachable from outside the cluster
+  # by default, per ADR-0003. Changing this to NodePort/LoadBalancer is the
+  # explicit opt-in required to expose the Web UI externally — there is no
+  # separate "expose UI" toggle.
+  type: ClusterIP
+  port: 8080
+
+resources: {}
+
+# Base URL of an external Prometheus server for the Web UI's per-key usage
+# graphs (ADR-0004). Optional — leave unset if you're not running the
+# usage-graph feature.
+prometheusURL: ""
+
+# Connection details for a pre-existing, externally managed PostgreSQL
+# instance. Ignored when postgresql.enabled is true. Per ADR-0005,
+# DATABASE_URL is always sourced from a Kubernetes Secret and never
+# accepted here as a plain connection string in values.yaml or a ConfigMap:
+# create the Secret yourself before `helm install` (see NOTES.txt).
+externalDatabase:
+  # Name of the pre-existing Secret holding DATABASE_URL. Defaults to
+  # "<release-name>-istio-api-key-auth-poc-db" when unset — create a Secret
+  # with that name, or set this to point at one you already have.
+  existingSecret: ""
+  existingSecretKey: DATABASE_URL
+
+# Bundled PostgreSQL (Bitnami subchart) for demos and local use. Disabled
+# by default: a plain `helm install` with no extra values targets an
+# external database (ADR-0005). Assumes the subchart's default naming
+# ("<release-name>-postgresql") — don't set postgresql.fullnameOverride.
+postgresql:
+  enabled: false
+  auth:
+    username: apikeyauth
+    # Demo-only credential for the bundled instance. Not used, and not
+    # relevant, when postgresql.enabled is false (the external-DB default).
+    password: apikeyauth-demo
+    database: apikeyauth

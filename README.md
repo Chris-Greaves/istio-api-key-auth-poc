@@ -33,6 +33,23 @@ To build the image on its own (e.g. for pushing to a registry):
 docker build -t istio-api-key-auth-poc .
 ```
 
+## Deploying with Helm
+
+The chart at `charts/istio-api-key-auth-poc` deploys the container image built above into a Kubernetes cluster. By default it targets an external Postgres instance: create a `Secret` named `<release>-istio-api-key-auth-poc-db` with a `DATABASE_URL` key before installing, then run:
+
+```sh
+helm dependency build charts/istio-api-key-auth-poc
+helm install my-release charts/istio-api-key-auth-poc
+```
+
+For a demo or local cluster with no external database, deploy a bundled Postgres instance instead:
+
+```sh
+helm install my-release charts/istio-api-key-auth-poc --set postgresql.enabled=true
+```
+
+The management Web UI's Service defaults to `ClusterIP` (see ADR-0003); set `service.type` to `NodePort`/`LoadBalancer` to opt in to external exposure.
+
 ## Additions to Be Added on Official Release
 
 - Deployed as a Kubernetes operator with CRDs to aid with the creating of API Keys.

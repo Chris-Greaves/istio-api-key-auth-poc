@@ -1,0 +1,64 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "istio-api-key-auth-poc.fullname" . }}
+  labels:
+    {{- include "istio-api-key-auth-poc.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "istio-api-key-auth-poc.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "istio-api-key-auth-poc.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- if .Values.postgresql.enabled }}
+      initContainers:
+        - name: wait-for-postgresql
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              until nc -z -w2 {{ include "istio-api-key-auth-poc.postgresqlHost" . }} 5432; do
+                echo "waiting for postgresql..."
+                sleep 2
+              done
+      {{- end }}
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.port }}
+              protocol: TCP
+          env:
+            - name: LISTEN_ADDR
+              value: {{ printf ":%d" (int .Values.service.port) | quote }}
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "istio-api-key-auth-poc.databaseSecretName" . }}
+                  key: {{ include "istio-api-key-auth-poc.databaseSecretKey" . }}
+            {{- if .Values.prometheusURL }}
+            - name: PROMETHEUS_URL
+              value: {{ .Values.prometheusURL | quote }}
+            {{- end }}
+          # /healthz reflects database connectivity, not just process liveness
+          # (ticket 01). Gating readiness on it correctly pulls the pod out of
+          # the Service during a DB outage; gating liveness on it would instead
+          # have kubelet kill and restart an otherwise-healthy process every
+          # time the database blips, so liveness only checks the process is
+          # accepting connections at all.
+          livenessProbe:
+            tcpSocket:
+              port: http
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}

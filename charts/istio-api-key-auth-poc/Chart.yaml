@@ -1,0 +1,14 @@
+apiVersion: v2
+name: istio-api-key-auth-poc
+description: >-
+  Envoy ext_authz API key check service, management Web UI, and Prometheus
+  metrics export for Istio mesh traffic. See README.md and CONTEXT.md in the
+  parent repo for the full picture.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+dependencies:
+  - name: postgresql
+    version: "18.12.4"
+    repository: https://charts.bitnami.com/bitnami
+    condition: postgresql.enabled

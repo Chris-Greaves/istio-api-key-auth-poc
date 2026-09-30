@@ -1,0 +1,23 @@
+{{ include "istio-api-key-auth-poc.fullname" . }} has been installed.
+
+{{- if .Values.postgresql.enabled }}
+
+A bundled PostgreSQL instance was deployed and wired into the
+{{ include "istio-api-key-auth-poc.databaseSecretName" . }} Secret. This is
+intended for demos/local use, not production.
+{{- else }}
+
+This install expects an external PostgreSQL instance. Make sure a Secret
+named "{{ include "istio-api-key-auth-poc.databaseSecretName" . }}" exists
+in this namespace with a "{{ include "istio-api-key-auth-poc.databaseSecretKey" . }}"
+key holding the full connection string, e.g.:
+
+  kubectl create secret generic {{ include "istio-api-key-auth-poc.databaseSecretName" . }} \
+    --from-literal={{ include "istio-api-key-auth-poc.databaseSecretKey" . }}='postgres://user:password@host:5432/dbname?sslmode=disable'
+
+If that Secret doesn't exist yet, the pod will fail to start.
+{{- end }}
+
+The service's Web UI/API Service defaults to ClusterIP (not reachable
+outside the cluster). Set service.type to NodePort/LoadBalancer to opt in
+to external exposure.

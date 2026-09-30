@@ -1,0 +1,31 @@
+name: Helm chart
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "charts/**"
+      - ".github/workflows/helm-chart.yml"
+  pull_request:
+    paths:
+      - "charts/**"
+      - ".github/workflows/helm-chart.yml"
+
+jobs:
+  lint-and-template:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: charts/istio-api-key-auth-poc
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: "v3.17.0"
+
+      - name: helm dependency build
+        run: helm dependency build .
+
+      - name: helm lint + helm template assertions
+        run: bash ci/assert-template.sh
