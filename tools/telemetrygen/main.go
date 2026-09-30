@@ -155,7 +155,14 @@ func main() {
 	})
 	wg.Wait()
 
-	summaryCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// A fresh context, not one derived from the now-cancelled ctx above: it
+	// still needs to make an HTTP call (the final /metrics scrape), but it
+	// still listens for a second interrupt/SIGTERM so the tool exits
+	// promptly rather than only after the full timeout if the service is
+	// unreachable or slow to respond during shutdown.
+	summaryCtx, stopSummary := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stopSummary()
+	summaryCtx, cancel := context.WithTimeout(summaryCtx, 10*time.Second)
 	defer cancel()
 	runFinalSummary(summaryCtx, logger, client, stats, checkBaseline, managementBaseline)
 }

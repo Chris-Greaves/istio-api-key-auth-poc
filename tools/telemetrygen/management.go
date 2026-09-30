@@ -98,6 +98,15 @@ func runManagementStream(ctx context.Context, logger *slog.Logger, client *apiCl
 							stats.RecordManagementFailed("revoke")
 							return
 						}
+						// The key was already revoked — e.g. another revoke
+						// tick raced onto the same key — so the server
+						// records this under operation=revoke_key,
+						// result=not_found rather than "success". It still
+						// got a response, so it's tallied as sent, but
+						// summary.go's revoke row only sums the "success"
+						// label: an expected race that shows up there as a
+						// mismatch, the same way BuildCheckComparison's doc
+						// comment calls out for a revoked "valid" key.
 						stats.RecordManagementSent("revoke")
 						return
 					}

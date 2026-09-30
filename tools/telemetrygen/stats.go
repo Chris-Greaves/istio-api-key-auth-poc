@@ -76,21 +76,15 @@ func (s *Stats) Snapshot() StatsSnapshot {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return StatsSnapshot{
-		CheckSent:   cloneScenarioCounts(s.checkSent),
-		CheckFailed: cloneScenarioCounts(s.checkFailed),
-		MgmtSent:    cloneStringCounts(s.mgmtSent),
-		MgmtFailed:  cloneStringCounts(s.mgmtFailed),
+		CheckSent:   cloneCounts(s.checkSent),
+		CheckFailed: cloneCounts(s.checkFailed),
+		MgmtSent:    cloneCounts(s.mgmtSent),
+		MgmtFailed:  cloneCounts(s.mgmtFailed),
 	}
 }
 
-func cloneScenarioCounts(m map[Scenario]int64) map[Scenario]int64 {
-	out := make(map[Scenario]int64, len(m))
-	maps.Copy(out, m)
-	return out
-}
-
-func cloneStringCounts(m map[string]int64) map[string]int64 {
-	out := make(map[string]int64, len(m))
+func cloneCounts[K comparable](m map[K]int64) map[K]int64 {
+	out := make(map[K]int64, len(m))
 	maps.Copy(out, m)
 	return out
 }
