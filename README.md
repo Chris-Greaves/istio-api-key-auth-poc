@@ -50,6 +50,10 @@ helm install my-release charts/istio-api-key-auth-poc --set postgresql.enabled=t
 
 The management Web UI's Service defaults to `ClusterIP` (see ADR-0003); set `service.type` to `NodePort`/`LoadBalancer` to opt in to external exposure.
 
+## Using with Istio
+
+See `docs/istio-integration.md` for a full walkthrough of registering the check service as an Istio `ext_authz` provider and enforcing it on a workload with an `AuthorizationPolicy`.
+
 ## Additions to Be Added on Official Release
 
 - Deployed as a Kubernetes operator with CRDs to aid with the creating of API Keys.
