@@ -92,6 +92,33 @@ func TestParsePrometheusMetric_ErrorsOnMissingValue(t *testing.T) {
 	}
 }
 
+// TestParsePrometheusMetric_HandlesEscapedQuoteFollowedByComma covers the bug
+// that motivated replacing the hand-rolled parser: a label value containing
+// a backslash-escaped quote immediately followed by a comma must not be
+// mistaken for the boundary between two labels.
+func TestParsePrometheusMetric_HandlesEscapedQuoteFollowedByComma(t *testing.T) {
+	text := `my_metric{reason="a\" complicated, value",result="denied"} 1` + "\n"
+
+	samples, err := ParsePrometheusMetric(text, "my_metric")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(samples) != 1 {
+		t.Fatalf("expected 1 sample, got %d: %+v", len(samples), samples)
+	}
+
+	got := samples[0]
+	if want := `a" complicated, value`; got.Labels["reason"] != want {
+		t.Errorf("expected reason %q, got %q", want, got.Labels["reason"])
+	}
+	if got.Labels["result"] != "denied" {
+		t.Errorf("expected result %q, got %q", "denied", got.Labels["result"])
+	}
+	if got.Value != 1 {
+		t.Errorf("expected value 1, got %v", got.Value)
+	}
+}
+
 func TestSumByLabels_SumsAcrossKeyIDsIgnoringUnfilteredLabels(t *testing.T) {
 	samples, err := ParsePrometheusMetric(samplePrometheusText, "check_service_decisions_total")
 	if err != nil {

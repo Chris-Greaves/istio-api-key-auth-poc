@@ -120,12 +120,6 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	if cfg.duration > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, cfg.duration)
-		defer cancel()
-	}
-
 	client := newAPIClient(cfg.baseURL)
 
 	pool, expiredKey, err := bootstrap(ctx, client, cfg.poolSize)
@@ -139,19 +133,25 @@ func main() {
 
 	stats := NewStats()
 
+	// --duration bounds only the traffic-generation window below, not the
+	// bootstrap/baseline-scrape setup above: its deadline is anchored here,
+	// once that setup has completed, not at process start.
+	trafficCtx, cancelTraffic := newTrafficWindowContext(ctx, cfg.duration)
+	defer cancelTraffic()
+
 	var wg sync.WaitGroup
 	wg.Go(func() {
 		logger.Info("check stream starting", "rate_per_sec", cfg.checkRate)
-		runCheckStream(ctx, logger, client, pool, expiredKey, cfg.weights, cfg.checkInterval, stats)
+		runCheckStream(trafficCtx, logger, client, pool, expiredKey, cfg.weights, cfg.checkInterval, stats)
 		logger.Info("check stream stopped")
 	})
 	wg.Go(func() {
 		logger.Info("management stream starting", "rate_per_min", cfg.managementRate)
-		runManagementStream(ctx, logger, client, pool, cfg.managementInterval, stats)
+		runManagementStream(trafficCtx, logger, client, pool, cfg.managementInterval, stats)
 		logger.Info("management stream stopped")
 	})
 	wg.Go(func() {
-		runProgressReporter(ctx, logger, stats)
+		runProgressReporter(trafficCtx, logger, stats)
 	})
 	wg.Wait()
 
@@ -165,6 +165,22 @@ func main() {
 	summaryCtx, cancel := context.WithTimeout(summaryCtx, 10*time.Second)
 	defer cancel()
 	runFinalSummary(summaryCtx, logger, client, stats, checkBaseline, managementBaseline)
+}
+
+// newTrafficWindowContext derives the traffic-generation window's context
+// from ctx, applying duration as a deadline starting now — i.e. from
+// whenever the caller invokes this, not from ctx's own creation. Call it only
+// once bootstrap and the pre-run baseline scrape have completed, so
+// --duration bounds the check/management streams' run time without eating
+// into setup time a large --pool-size can make substantial. A non-positive
+// duration (0 means unbounded, and parseFlags rejects negative values)
+// returns ctx unchanged, paired with a no-op cancel func so callers can defer
+// it unconditionally.
+func newTrafficWindowContext(ctx context.Context, duration time.Duration) (context.Context, context.CancelFunc) {
+	if duration <= 0 {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, duration)
 }
 
 // bootstrap stands up the shared pool of valid API Keys plus one dedicated

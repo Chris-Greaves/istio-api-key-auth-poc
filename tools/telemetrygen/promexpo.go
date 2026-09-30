@@ -1,10 +1,12 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
-	"strconv"
 	"strings"
+
+	dto "github.com/prometheus/client_model/go"
+	"github.com/prometheus/common/expfmt"
+	"github.com/prometheus/common/model"
 )
 
 // PromSample is a single Prometheus exposition-format sample: a metric's
@@ -16,119 +18,51 @@ type PromSample struct {
 
 // ParsePrometheusMetric extracts every sample for metricName out of
 // Prometheus exposition-format text (as served by the service's /metrics
-// endpoint), ignoring comment/HELP/TYPE lines and every other metric family.
-// It's a pure function of text, independent of any running service, so the
-// final summary's diff logic is unit-testable against fixed sample text.
+// endpoint), ignoring every other metric family. It's a pure function of
+// text, independent of any running service, so the final summary's diff
+// logic is unit-testable against fixed sample text. Parsing is delegated to
+// prometheus/common/expfmt's TextParser rather than a hand-rolled parser, so
+// it correctly handles exposition-format edge cases (e.g. an escaped quote
+// followed by a comma inside a label value) that a naive comma/quote scan
+// gets wrong.
 func ParsePrometheusMetric(text, metricName string) ([]PromSample, error) {
-	var samples []PromSample
-
-	scanner := bufio.NewScanner(strings.NewReader(text))
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") || !strings.HasPrefix(line, metricName) {
-			continue
-		}
-
-		rest := line[len(metricName):]
-		if rest == "" || (rest[0] != '{' && rest[0] != ' ') {
-			// A different metric that happens to share this prefix, e.g.
-			// metricName="check_service_decisions_total" must not match a
-			// line for "check_service_decisions_total_created".
-			continue
-		}
-
-		sample, err := parsePromSampleLine(rest)
-		if err != nil {
-			return nil, fmt.Errorf("parsing sample line %q: %w", line, err)
-		}
-		samples = append(samples, sample)
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("scanning prometheus exposition text: %w", err)
+	parser := expfmt.NewTextParser(model.LegacyValidation)
+	families, err := parser.TextToMetricFamilies(strings.NewReader(text))
+	if err != nil {
+		return nil, fmt.Errorf("parsing prometheus exposition text: %w", err)
 	}
 
+	family, ok := families[metricName]
+	if !ok {
+		return nil, nil
+	}
+
+	samples := make([]PromSample, 0, len(family.GetMetric()))
+	for _, m := range family.GetMetric() {
+		labels := make(map[string]string, len(m.GetLabel()))
+		for _, lp := range m.GetLabel() {
+			labels[lp.GetName()] = lp.GetValue()
+		}
+		samples = append(samples, PromSample{Labels: labels, Value: metricValue(m)})
+	}
 	return samples, nil
 }
 
-// parsePromSampleLine parses the portion of an exposition-format line after
-// its metric name: an optional {label="value",...} set, followed by the
-// sample's value and an optional trailing timestamp (ignored).
-func parsePromSampleLine(rest string) (PromSample, error) {
-	rest = strings.TrimSpace(rest)
-
-	labels := map[string]string{}
-	if strings.HasPrefix(rest, "{") {
-		end := strings.Index(rest, "}")
-		if end == -1 {
-			return PromSample{}, fmt.Errorf("unterminated label set")
-		}
-
-		for _, kv := range splitPromLabels(rest[1:end]) {
-			key, value, err := parsePromLabel(kv)
-			if err != nil {
-				return PromSample{}, err
-			}
-			labels[key] = value
-		}
-		rest = strings.TrimSpace(rest[end+1:])
+// metricValue extracts a parsed Metric's numeric value regardless of its
+// declared type. Every metric this tool reads is a counter, but falling back
+// to gauge/untyped costs nothing and avoids a silent zero if a family's
+// # TYPE line is ever missing or wrong.
+func metricValue(m *dto.Metric) float64 {
+	switch {
+	case m.Counter != nil:
+		return m.GetCounter().GetValue()
+	case m.Gauge != nil:
+		return m.GetGauge().GetValue()
+	case m.Untyped != nil:
+		return m.GetUntyped().GetValue()
+	default:
+		return 0
 	}
-
-	fields := strings.Fields(rest)
-	if len(fields) == 0 {
-		return PromSample{}, fmt.Errorf("missing value")
-	}
-	value, err := strconv.ParseFloat(fields[0], 64)
-	if err != nil {
-		return PromSample{}, fmt.Errorf("parsing value %q: %w", fields[0], err)
-	}
-
-	return PromSample{Labels: labels, Value: value}, nil
-}
-
-// splitPromLabels splits a label-set's interior (the text between { and })
-// on top-level commas, respecting quoted label values so a comma inside one
-// (which Prometheus label values, unlike ours, are technically allowed to
-// contain) doesn't split it in two.
-func splitPromLabels(s string) []string {
-	if strings.TrimSpace(s) == "" {
-		return nil
-	}
-
-	var parts []string
-	var current strings.Builder
-	inQuotes := false
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		switch {
-		case c == '"':
-			inQuotes = !inQuotes
-			current.WriteByte(c)
-		case c == ',' && !inQuotes:
-			parts = append(parts, current.String())
-			current.Reset()
-		default:
-			current.WriteByte(c)
-		}
-	}
-	parts = append(parts, current.String())
-	return parts
-}
-
-// parsePromLabel parses a single label="value" pair, unescaping the value's
-// surrounding quotes and \" / \\ escapes.
-func parsePromLabel(kv string) (key, value string, err error) {
-	rawKey, rawValue, ok := strings.Cut(kv, "=")
-	if !ok {
-		return "", "", fmt.Errorf("malformed label %q", kv)
-	}
-
-	key = strings.TrimSpace(rawKey)
-	value = strings.TrimSpace(rawValue)
-	value = strings.TrimPrefix(value, `"`)
-	value = strings.TrimSuffix(value, `"`)
-	value = strings.ReplaceAll(value, `\"`, `"`)
-	value = strings.ReplaceAll(value, `\\`, `\`)
-	return key, value, nil
 }
 
 // SumByLabels sums the Value of every sample in samples whose labels match
